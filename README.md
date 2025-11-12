@@ -2,10 +2,10 @@
 
 **Multi-MIME Type Wayland Clipboard Utility**
 
-If you use Wayland and have ever tried to paste a screenshot into a terminal application (VS Code terminal, Claude Code, etc.) and nothing happens (or even worse, binary stuff) instead of what you expected, this tool is for you.
+If you use Wayland and have ever tried to paste a screenshot into a terminal application (VS Code terminal, Claude Code, etc.) and nothing happens (or even worse, binary stuff) instead of what you expected, this tool is for you. I.e you can't paste it as an image in Discord AND as a file path in your terminal apps. You have to choose ONE format, which is annoying. 
 
-Ie you can't paste it as an image in Discord AND as a file path in your terminal apps. You have to choose ONE format, which is annoying. 
-For example, if i wanna debug complicated web development, i'd usually take a screenshot and show it to my LLM CLI. But when i take the damn picture, i cant just paste it in the terminal. I literally have to 1) take screenshot, manually save it, go to my file explorer, find the damn picture, copy it manually (bc ctrl+c doesnt cut it), and THEN paste it into the LLM CLI in the terminal. 
+For example, if i wanna debug complicated web development, i'd usually take a screenshot and show it to my LLM CLI. But when i take the picture, i cant just paste it in the terminal. I literally have to 1) take screenshot, 2) manually save it, 3) go to my file explorer, 4) find the damn thing, 5) copy it manually (bc ctrl+c doesnt cut it for some reason), and THEN 6) paste it into the LLM CLI in the terminal. So that i fixed.
+
 <img width="340" height="423" alt="image" src="https://github.com/user-attachments/assets/02c075e6-39a5-48a5-9c45-1be97225b426" />
 
 ## How It Works
