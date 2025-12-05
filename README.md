@@ -1,6 +1,4 @@
-# wl-clip-multi
-
-**Multi-MIME Type Wayland Clipboard Utility**
+# **Multi-MIME Type Wayland Clipboard Utility**
 
 If you use Wayland and have ever tried to paste a screenshot into a terminal application (VS Code terminal, Claude Code, etc.) and nothing happens (or even worse, binary stuff) instead of what you expected, this tool is for you. I.e you can't paste it as an image in Discord AND as a file path in your terminal apps. You have to choose ONE format, which is annoying. 
 
