@@ -1,0 +1,184 @@
+#!/bin/bash
+# Smart Screenshot with Multi-MIME Clipboard Support
+# Added: January 5, 2025
+#
+# Takes a screenshot and copies it to clipboard with multiple MIME types simultaneously:
+# - Visual apps (Obsidian, Discord, browsers) receive image/png data
+# - Terminals (Claude Code) receive file path as x-special/gnome-copied-files
+#
+# This allows pasting the same screenshot with appropriate behavior in different apps.
+
+[[ -f ~/.config/user-dirs.dirs ]] && source ~/.config/user-dirs.dirs
+OUTPUT_DIR="${OMARCHY_SCREENSHOT_DIR:-${XDG_PICTURES_DIR:-$HOME/Pictures}}"
+
+if [[ ! -d "$OUTPUT_DIR" ]]; then
+  notify-send "Screenshot directory does not exist: $OUTPUT_DIR" -u critical -t 3000
+  exit 1
+fi
+
+# If slurp is already running, kill it and exit
+pkill slurp && exit 0
+
+# Get all monitor and window rectangles on the active workspace
+get_rectangles() {
+  local active_workspace=$(hyprctl monitors -j | jq -r '.[] | select(.focused == true) | .activeWorkspace.id')
+  hyprctl monitors -j | jq -r --arg ws "$active_workspace" '.[] | select(.activeWorkspace.id == ($ws | tonumber)) | "\(.x),\(.y) \((.width / .scale) | floor)x\((.height / .scale) | floor)"'
+  hyprctl clients -j | jq -r --arg ws "$active_workspace" '.[] | select(.workspace.id == ($ws | tonumber)) | "\(.at[0]),\(.at[1]) \(.size[0])x\(.size[1])"'
+}
+
+# Smart selection with window snapping
+# Freeze screen while selecting region
+RECTS=$(get_rectangles)
+wayfreeze & PID=$!
+sleep .1
+SELECTION=$(echo "$RECTS" | slurp 2>/dev/null)
+kill $PID 2>/dev/null
+
+# If selection area is tiny (area < 20 pixels), snap to containing window/output
+# This allows clicking inside a window to capture the entire window
+if [[ "$SELECTION" =~ ^([0-9]+),([0-9]+)[[:space:]]([0-9]+)x([0-9]+)$ ]]; then
+  if (( ${BASH_REMATCH[3]} * ${BASH_REMATCH[4]} < 20 )); then
+    click_x="${BASH_REMATCH[1]}"
+    click_y="${BASH_REMATCH[2]}"
+
+    while IFS= read -r rect; do
+      if [[ "$rect" =~ ^([0-9]+),([0-9]+)[[:space:]]([0-9]+)x([0-9]+) ]]; then
+        rect_x="${BASH_REMATCH[1]}"
+        rect_y="${BASH_REMATCH[2]}"
+        rect_width="${BASH_REMATCH[3]}"
+        rect_height="${BASH_REMATCH[4]}"
+
+        if (( click_x >= rect_x && click_x < rect_x+rect_width && click_y >= rect_y && click_y < rect_y+rect_height )); then
+          SELECTION="${rect_x},${rect_y} ${rect_width}x${rect_height}"
+          break
+        fi
+      fi
+    done <<< "$RECTS"
+  fi
+fi
+
+# Exit if no selection was made (user cancelled)
+[ -z "$SELECTION" ] && exit 0
+
+# Generate filename with timestamp
+FILENAME="$OUTPUT_DIR/screenshot-$(date +'%Y-%m-%d_%H-%M-%S').png"
+
+# Capture screenshot and save to file
+grim -g "$SELECTION" "$FILENAME"
+
+# Kill any existing clipboard daemons to prevent conflicts
+pkill -9 -f "python3.*MultiMimeClipboard" 2>/dev/null
+
+# Start embedded clipboard daemon that offers multiple MIME types
+# This mimics GNOME Nautilus behavior - offers 6 MIME types simultaneously
+# wl-clip-persist will automatically read all MIME types and persist them
+nohup python3 - "$FILENAME" >/dev/null 2>&1 <<'PYTHON_EOF' &
+import sys
+import os
+import signal
+from pathlib import Path
+from pywayland.client import Display
+from pywayland.protocol.wayland import WlDataDeviceManager, WlSeat
+
+class MultiMimeClipboard:
+    """Clipboard provider that offers multiple MIME types simultaneously."""
+
+    def __init__(self, file_path):
+        self.file_path = Path(file_path).resolve()
+        if not self.file_path.exists():
+            raise FileNotFoundError(f"File not found: {self.file_path}")
+
+        with open(self.file_path, 'rb') as f:
+            self.file_data = f.read()
+
+        self.mime_type = self._detect_mime_type()
+
+    def _detect_mime_type(self):
+        """Detect MIME type based on file extension."""
+        suffix = self.file_path.suffix.lower()
+        mime_types = {
+            '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+            '.gif': 'image/gif', '.bmp': 'image/bmp', '.webp': 'image/webp',
+            '.svg': 'image/svg+xml', '.txt': 'text/plain', '.pdf': 'application/pdf',
+        }
+        return mime_types.get(suffix, 'application/octet-stream')
+
+    def serve_with_pywayland(self):
+        """Connect to Wayland and offer multiple MIME types."""
+        display = Display()
+        display.connect()
+        registry = display.get_registry()
+
+        seat = None
+        data_device_manager = None
+
+        def registry_handler(registry, id, interface, version):
+            nonlocal seat, data_device_manager
+            if interface == 'wl_seat':
+                seat = registry.bind(id, WlSeat, version)
+            elif interface == 'wl_data_device_manager':
+                data_device_manager = registry.bind(id, WlDataDeviceManager, version)
+
+        registry.dispatcher['global'] = registry_handler
+        display.dispatch(block=True)
+        display.roundtrip()
+
+        if not seat or not data_device_manager:
+            raise RuntimeError("Could not get required Wayland objects")
+
+        data_source = data_device_manager.create_data_source()
+
+        # Offer MIME types in EXACT order as GNOME Nautilus
+        data_source.offer('x-special/gnome-copied-files')
+        data_source.offer('text/plain;charset=utf-8')
+        data_source.offer('text/uri-list')
+        data_source.offer('application/vnd.portal.filetransfer')
+        data_source.offer('application/vnd.portal.files')
+        data_source.offer(self.mime_type)
+
+        # Prepare clipboard data formats (EXACT format as Nautilus)
+        gnome_format = f'copy\nfile://{self.file_path}'.encode('utf-8')
+        file_uri = f'file://{self.file_path}\n'.encode('utf-8')
+        plain_text = str(self.file_path).encode('utf-8')
+
+        def send_handler(data_source, mime_type, fd):
+            try:
+                if mime_type == 'x-special/gnome-copied-files':
+                    os.write(fd, gnome_format)
+                elif mime_type == 'text/uri-list':
+                    os.write(fd, file_uri)
+                elif mime_type in ('text/plain', 'text/plain;charset=utf-8'):
+                    os.write(fd, plain_text)
+                elif mime_type == self.mime_type:
+                    os.write(fd, self.file_data)
+            finally:
+                try:
+                    os.close(fd)
+                except:
+                    pass
+
+        data_source.dispatcher['send'] = send_handler
+        data_device = data_device_manager.get_data_device(seat)
+        data_device.set_selection(data_source, 0)
+        display.flush()
+        display.roundtrip()
+
+        signal.signal(signal.SIGINT, lambda s, f: sys.exit(0))
+        signal.signal(signal.SIGTERM, lambda s, f: sys.exit(0))
+
+        while True:
+            display.dispatch(block=True)
+
+if __name__ == '__main__':
+    clipboard = MultiMimeClipboard(sys.argv[1])
+    clipboard.serve_with_pywayland()
+PYTHON_EOF
+
+DAEMON_PID=$!
+disown $DAEMON_PID
+
+# Give daemon time to initialize and register with Wayland compositor
+# wl-clip-persist will read all MIME types during this time
+sleep 1.5
+
+notify-send "Screenshot ready" "Saved & copied to clipboard" -t 2000

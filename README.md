@@ -31,6 +31,10 @@ Apps then choose their preferred format when you paste.
 
 ## Installation
 
+This repo provides two tools:
+- **`wl-clip-multi`**: General-purpose multi-MIME clipboard tool for any file
+- **`screenshot-smart-clipboard`**: Complete screenshot solution with integrated multi-MIME clipboard (Hyprland)
+
 ### 1. Install Dependencies
 
 ```bash
@@ -41,13 +45,25 @@ sudo pacman -S wl-clip-persist  # Arch/Manjaro
 yay -S wl-clip-persist  # AUR
 ```
 
-### 2. Install wl-clip-multi
+### 2. Install the tools
 
+**For general clipboard use:**
 ```bash
-git clone https://github.com/mrdrbrdr/wl-clip-multi.git
-cd wl-clip-multi
+git clone https://github.com/mrdrbrdr/wl-paste-anywhere.git
+cd wl-paste-anywhere
 sudo cp bin/wl-clip-multi /usr/local/bin/
 sudo chmod +x /usr/local/bin/wl-clip-multi
+```
+
+**For integrated screenshot solution (Hyprland):**
+```bash
+cp bin/screenshot-smart-clipboard ~/.local/bin/
+chmod +x ~/.local/bin/screenshot-smart-clipboard
+```
+
+Then bind it to a keybinding in your Hyprland config:
+```
+bind = , Print, exec, ~/.local/bin/screenshot-smart-clipboard
 ```
 
 ### 3. Setup wl-clip-persist (Required)
